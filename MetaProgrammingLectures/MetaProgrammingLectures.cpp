@@ -178,25 +178,90 @@ struct overloaded : Ts...
     using Ts::operator()...;
 };
 
+struct vertex_shader {
+    void update() { std::cout << "Vertex shader update\n"; }
+};
+
+struct geometry_shader {
+    void update() { std::cout << "Geometry shader update\n"; }
+};
+
+struct fragment_shader {
+    void update() { std::cout << "Fragment shader update\n"; }
+};
+
+template<class T>
+constexpr bool has_update_v{ requires(T& t) { t.update(); } };
+
+static_assert(has_update_v<vertex_shader>);
+static_assert(!has_update_v<int>);
+
+template<class... Ts>
+    requires (has_update_v<Ts> && ...)
+using shader_program = std::tuple<Ts...>;
+
+template<std::size_t... Is>
+struct index_sequence{};
+
+template<class T, class U>
+struct concat_sequences;
+
+template<std::size_t... Is, std::size_t... Js>
+struct concat_sequences<index_sequence<Is...>, index_sequence<Js...>>
+{
+    using type = index_sequence<Is..., Js...>;
+};
+
+template<class T, class U>
+using concat_sequences_t = typename concat_sequences<T, U>::type;
+
+static_assert(std::is_same_v<concat_sequences_t<index_sequence<42>, index_sequence<7>> , index_sequence<42, 7>>);
+
+template<std::size_t N>
+struct do_make_index_sequence;
+
+template<std::size_t N>
+using make_index_sequence = typename do_make_index_sequence<N>::type;
+
+template<>
+struct do_make_index_sequence<0>
+{
+    using type = index_sequence<>;
+};
+
+template<std::size_t N>
+struct do_make_index_sequence
+{
+    using type = concat_sequences_t<make_index_sequence<N - 1>, index_sequence<N - 1>>;
+};
+
+static_assert(std::is_same_v<make_index_sequence<0> , index_sequence<>>);
+static_assert(std::is_same_v<make_index_sequence<1>, index_sequence<0>>);
+static_assert(std::is_same_v<make_index_sequence<2>, index_sequence<0, 1>>);
+static_assert(std::is_same_v<make_index_sequence<3>, index_sequence<0, 1, 2>>);
+static_assert(std::is_same_v<make_index_sequence<10>, index_sequence<0, 1, 2,3,4,5,6,7,8,9>>);
+
+
+template<std::size_t... Is, class... Ts>
+    requires (has_update_v<Ts> && ...)
+void update(index_sequence<Is...>, shader_program<Ts...>& prog)
+{
+    (std::get<Is>(prog).update(), ...);
+}
+
+template<class... Ts>
+    requires (has_update_v<Ts> && ...)
+void update(shader_program<Ts...>& prog)
+{
+    //update(make_index_sequence<sizeof...(Ts)>{}, prog);
+    [&prog] <std::size_t... Is> (index_sequence<Is...>){
+        (std::get<Is>(prog).update(), ...);
+    }(make_index_sequence<sizeof...(Ts)>{});
+}
+
 int main()
 {
-    using animal_variants = std::variant<platypus, bee, penguin, bat>;
-    using animal_container = std::vector<animal_variants>;
+    shader_program prog{vertex_shader{}, geometry_shader{}, fragment_shader{}};
 
-    animal_container animals{platypus{}, bee{}, penguin{}, bat{}};
-
-    for(auto& a : animals)
-    {
-        std::visit([](auto& e){ e.walk(); }, a);
-    }
-
-    for(auto& a : animals)
-    {
-        overloaded visitor{
-            []<class T> requires can_swim<T> (T& t){ t.swim(); },
-            []<class T> requires can_fly<T>  (T& t){ t.fly(); }
-        };
-
-        std::visit(visitor, a);
-    }
+    update(prog);
 }
